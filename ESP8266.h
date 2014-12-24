@@ -37,6 +37,7 @@ class ESP8266
     
     // init / connect / disconnect access point
     int initializeWifi(DataCallback dcb, ConnectCallback ccb);
+    void enableWatchDogTimer();    
     int connectWifi(char *ssid, char *password);
     bool disconnectWifi();
     

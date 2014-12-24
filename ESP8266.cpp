@@ -1,7 +1,8 @@
+#include <avr/wdt.h>
 #include "Arduino.h"
 #include "ESP8266.h"
 
-#define wifi Serial
+#define wifi Serial1
 #define SVR_CHAN 1
 #define BCN_CHAN 2
 #define CLI_CHAN 3
@@ -16,8 +17,8 @@ enum connectMode {
 
 int  _mode;
 long _baudrate;
-char _ipaddress[15];
-char _broadcast[15];
+char _ipaddress[16];
+char _broadcast[16];
 int  _port;
 char _device[48];
 char _ssid[48];
@@ -31,6 +32,7 @@ ConnectCallback _ccb;
 char _wb[BUFFER_SIZE];
 int _wctr = 0;
 bool _connected;
+bool _forceReset;
 int _connectMode;
 int _debugLevel = 0;
 
@@ -41,8 +43,8 @@ ESP8266::ESP8266(int mode, long baudrate, int debugLevel)
   _debugLevel = debugLevel;
   _port = 8000;
   _replyChan = 0;
-  memset(_ipaddress, 0, 15);
-  memset(_broadcast, 0, 15);
+  memset(_ipaddress, 0, 16);
+  memset(_broadcast, 0, 16);
   memset(_device, 0, 48);
   memset(_ssid, 0, 48);
   memset(_password, 0, 24);
@@ -50,11 +52,11 @@ ESP8266::ESP8266(int mode, long baudrate, int debugLevel)
   _beaconInterval = (10000L);
   _previousMillis = 0;
   _connected = false;
+  _forceReset = false;
 }
 
 int ESP8266::initializeWifi(DataCallback dcb, ConnectCallback ccb)
-{
-  
+{  
   if (dcb) {
     _dcb = dcb;
   }
@@ -81,7 +83,7 @@ int ESP8266::initializeWifi(DataCallback dcb, ConnectCallback ccb)
   // reset WiFi module
   wifi.println(F("AT+RST"));
   delay(500);
-  if(!searchResults("Ready", 5000, _debugLevel)) {
+  if(!searchResults("ready", 5000, _debugLevel)) {
     return WIFI_ERR_RESET;
   }
   
@@ -109,8 +111,7 @@ int ESP8266::connectWifi(char *ssid, char *password)
   wifi.print(F("\",\""));
   wifi.print(password);
   wifi.println(F("\""));
-  delay(100);
-  if(!searchResults("OK", 30000, _debugLevel)) {
+  if(!searchResults("OK", 5000, _debugLevel)) {
     return WIFI_ERR_CONNECT;
   }
   
@@ -133,6 +134,12 @@ bool ESP8266::disconnectWifi()
   
 }
 
+void ESP8266::enableWatchDogTimer()
+{
+  wdt_enable(WDTO_8S);
+  _forceReset = true;
+}
+
 bool ESP8266::enableBeacon(char *device)
 {
   // you can only beacon if you're a server
@@ -150,8 +157,6 @@ bool ESP8266::disableBeacon()
 {
   _beacon = false;
 }
-
-
 
 bool ESP8266::send(char *data)
 {
@@ -213,6 +218,11 @@ void ESP8266::run()
     strcat(_data, line7);
     
     sendData(BCN_CHAN, _data);
+  }
+  
+  if (_forceReset == true) {
+    // reset the watch dog timer
+    wdt_reset();
   }
 }
 
@@ -357,10 +367,7 @@ bool ESP8266::sendData(int chan, char *data) {
   
   delay(50);
   
-  // to debug only
-  searchResults("OK", 500, _debugLevel);
-  
-  return true;
+  return searchResults("OK", 1000, _debugLevel);  
 }
 
 bool ESP8266::setLinkMode(int mode) {
@@ -424,6 +431,11 @@ bool ESP8266::getIP() {
       ptr++;
     }
   }
+  
+  if (_debugLevel > 0) {
+    debug("DBG Get IP:");
+    debug(_ipaddress);
+  }
 
   return ret;
 }
@@ -437,7 +449,7 @@ bool ESP8266::getBroadcast() {
     return false;
   }
   
-  memset(_broadcast, 0, 15);
+  memset(_broadcast, 0, 16);
   for (i = 0; i < strlen(_ipaddress); i++) {
     c = _ipaddress[i];
     _broadcast[i] = c;
@@ -448,6 +460,12 @@ bool ESP8266::getBroadcast() {
   _broadcast[i++] = 50;
   _broadcast[i++] = 53;
   _broadcast[i++] = 53;
+  _broadcast[i] = 0;
+  
+  if (_debugLevel > 0) {
+    debug("DBG Get Broadcast:");
+    debug(_broadcast);
+  }
   
   return true;
 }
@@ -498,13 +516,28 @@ bool ESP8266::searchResults(char *target, long timeout, int dbg)
   } while(millis() - _startMillis < timeout);
 
   if (dbg > 0) {
+    debug("Fail on search results expecting");
+    char targetMsg[100];
+    sprintf(targetMsg, "Target: %s", target);
+    debug(targetMsg);
     if (_data[0] == 0) {
-      debug("Failed: No data");
+      debug("Reason: No data");
     } else {
-      debug("Failed");
+      debug("Instead received start---");
       debug(_data);
+      debug("Instead received end---");      
     }
   }
+  
+  if (_forceReset == true) {
+    if (dbg > 0) {    
+      // we some how lost the link, so want to force a reset
+      debug("Forcing reset");  
+    }
+      // force reset
+    while(1);
+  }
+
   return false;
 }
 
@@ -512,5 +545,11 @@ void ESP8266::clearResults() {
   char c;
   while(wifi.available() > 0) {
     c = wifi.read();
+//     if (_debugLevel > 0) {
+//       char msg[2];
+//       sprintf(msg, "%c", c);
+//       msg[1] = NULL;
+//       debug(msg);
+//     }
   }
 }
