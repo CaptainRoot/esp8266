@@ -2,6 +2,7 @@
 #include "Arduino.h"
 #include "ESP8266.h"
 
+#define debugSer Serial
 #define wifi Serial1
 #define SVR_CHAN 1
 #define BCN_CHAN 2
@@ -142,6 +143,13 @@ void ESP8266::enableWatchDogTimer()
 
 bool ESP8266::enableBeacon(char *device)
 {
+  if (device == NULL) {
+    // re-enable the beacon.
+    _beaconInterval = (10000L);
+    _beacon = true;
+    return true;
+  }
+
   // you can only beacon if you're a server
   if (_connectMode != CONNECT_MODE_SERVER)
     return false;
@@ -166,6 +174,7 @@ bool ESP8266::send(char *data)
   } else {
     chan = CLI_CHAN;
   }
+
   return sendData(chan, data);
 }
 
@@ -183,6 +192,7 @@ void ESP8266::run()
       if (v == 10) {
         _wb[_wctr] = 0;
         _wctr = 0;
+        
         processWifiMessage();
       } else if (v == 13) {
         // gndn
@@ -205,8 +215,9 @@ void ESP8266::run()
     
     // convert port to a string
     char p[6];
+    memset(p, 0, 6);
     itoa(_port, p, 10);
-    
+
     // get lenthg of message text
     memset(_data, 0, 255);
     strcat(_data, line1);
@@ -299,6 +310,24 @@ int ESP8266::scan(char *out, int max)
   return count;
 }
 
+bool ESP8266::closeConnection(void)
+{
+  int chan;
+  if (_connectMode == CONNECT_MODE_SERVER) {
+    chan = _replyChan;
+  } else {
+    chan = CLI_CHAN;
+  }
+  
+  wifi.print("AT+CIPCLOSE=");
+  wifi.println(String(chan));
+  if(!searchResults("OK", 500, _debugLevel)) {
+    return false;
+  }
+  
+  return true;
+}
+
 // *****************************************************************************
 // PRIVATE FUNCTIONS BELOW THIS POINT
 // *****************************************************************************
@@ -331,7 +360,7 @@ void ESP8266::processWifiMessage() {
     
     // cache the channel ID - this is used to reply
     _replyChan = channel;
-    
+                
     // if the packet contained data, move the pointer past the header
     if (packet_len > 0) {
       pb = _wb+5;
@@ -340,9 +369,10 @@ void ESP8266::processWifiMessage() {
       
       // execute the callback passing a pointer to the message
       if (_dcb) {
-        _dcb(pb);
+        clearResults();
+        _dcb(pb);        
       }
-      
+            
       // DANGER WILL ROBINSON - there is no ring buffer or other safety net here.
       // the application should either use the data immediately or make a copy of it!
       // do NOT block in the callback or bad things may happen
@@ -355,6 +385,8 @@ void ESP8266::processWifiMessage() {
 }
 
 bool ESP8266::sendData(int chan, char *data) {
+
+  clearResults();
 
   // start send
   wifi.print(F("AT+CIPSEND="));
@@ -387,7 +419,7 @@ bool ESP8266::startUDPChannel(int chan, char *address, int port) {
   wifi.print(address);
   wifi.print("\",");
   wifi.println(port);
-  if(!searchResults("OK", 500, _debugLevel)) {
+  if(!searchResults("OK", 1000, _debugLevel)) {
     return false;
   }
   return true;
@@ -471,13 +503,19 @@ bool ESP8266::getBroadcast() {
 }
 
 void ESP8266::debug(char *msg) {
-  if (_dcb && (_debugLevel > 0)) {
-    _dcb(msg);
+  if (_debugLevel > 0) {
+    debugSer.println(msg);
   } 
 }
 
 bool ESP8266::searchResults(char *target, long timeout, int dbg)
 {
+  if (dbg > 1) {
+    char targetMsg[100];
+    sprintf(targetMsg, "Search Target: %s", target);
+    debug(targetMsg);
+  }
+      
   int c;
   int index = 0;
   int targetLength = strlen(target);
@@ -489,9 +527,7 @@ bool ESP8266::searchResults(char *target, long timeout, int dbg)
   long _startMillis = millis();
   do {
     c = wifi.read();
-    
     if (c >= 0) {
-
       if (dbg > 0) {
         if (count >= 254) {
           debug(_data);
@@ -509,17 +545,17 @@ bool ESP8266::searchResults(char *target, long timeout, int dbg)
         if(++index >= targetLength){
           if (dbg > 1)
             debug(_data);
+            
+          debug("Search Found!");  
+                        
           return true;
         }
       }
     }
   } while(millis() - _startMillis < timeout);
 
-  if (dbg > 0) {
-    debug("Fail on search results expecting");
-    char targetMsg[100];
-    sprintf(targetMsg, "Target: %s", target);
-    debug(targetMsg);
+  if (dbg > 1) {
+    debug("Fail on search results");
     if (_data[0] == 0) {
       debug("Reason: No data");
     } else {
@@ -544,7 +580,7 @@ bool ESP8266::searchResults(char *target, long timeout, int dbg)
 void ESP8266::clearResults() {
   char c;
   while(wifi.available() > 0) {
-    c = wifi.read();
+    c = wifi.read();    
 //     if (_debugLevel > 0) {
 //       char msg[2];
 //       sprintf(msg, "%c", c);

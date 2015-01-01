@@ -10,8 +10,6 @@
 #ifndef ESP8266_h
 #define ESP8266_h
 
-#include <AltSoftSerial.h>
-
 typedef int (*DataCallback)(char *);
 typedef void (*ConnectCallback)(void);
 
@@ -53,6 +51,7 @@ class ESP8266
     
     // send data across the link
     bool send(char *data);
+    bool closeConnection(void);
     
     // process wifi messages - MUST be called from main app's loop
     void run();
