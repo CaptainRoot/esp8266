@@ -60,7 +60,7 @@ class ESP8266
     char *ip();
     int scan(char *out, int max);
   private:
-    void clearResults();
+    void clearResults(unsigned long minTimeMillis = 0UL);
     bool sendData(int chan, char *data);
     bool setLinkMode(int mode);
     bool startUDPChannel(int chan, char *address, int port);
@@ -68,6 +68,7 @@ class ESP8266
     bool getIP();
     bool getBroadcast();
     void debug(char *msg);
+    void debug(const __FlashStringHelper* msg);    
     bool searchResults(char *target, long timeout, int dbg = 0);
 };
 

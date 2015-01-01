@@ -69,32 +69,28 @@ int ESP8266::initializeWifi(DataCallback dcb, ConnectCallback ccb)
   wifi.begin(_baudrate);
   wifi.setTimeout(5000); 
   
-  //delay(500);
   clearResults();
   
   // check for presence of wifi module
   wifi.println(F("AT"));
-  delay(500);
-  if(!searchResults("OK", 1000, _debugLevel)) {
+  if(!searchResults("OK", 5000, _debugLevel)) {
     return WIFI_ERR_AT;
   } 
   
-  //delay(500);
+  clearResults();
   
   // reset WiFi module
   wifi.println(F("AT+RST"));
-  delay(500);
   if(!searchResults("ready", 5000, _debugLevel)) {
     return WIFI_ERR_RESET;
-  }
+  }  
   
-  delay(500);
-  
+  clearResults();
+
   // set the connectivity mode 1=sta, 2=ap, 3=sta+ap
   wifi.print(F("AT+CWMODE="));
   wifi.println(_mode);
-  //delay(500);
-  
+    
   clearResults();
   
   return WIFI_ERR_NONE;
@@ -106,6 +102,8 @@ int ESP8266::connectWifi(char *ssid, char *password)
   strcpy(_ssid, ssid);
   strcpy(_password, password);
   
+  clearResults();
+
   // set the access point value and connect
   wifi.print(F("AT+CWJAP=\""));
   wifi.print(ssid);
@@ -239,6 +237,7 @@ void ESP8266::run()
 
 bool ESP8266::startServer(int port, long timeout)
 {
+  clearResults();
   
   // cache the port number for the beacon
   _port = port;
@@ -247,14 +246,14 @@ bool ESP8266::startServer(int port, long timeout)
   wifi.print(SVR_CHAN);
   wifi.print(F(","));
   wifi.println(_port);
-  if(!searchResults("OK", 500, _debugLevel)){
+  if(!searchResults("OK", 5000, _debugLevel)){
     return false;
   }
   
   // send AT command
   wifi.print(F("AT+CIPSTO="));
   wifi.println(timeout);
-  if(!searchResults("OK", 500, _debugLevel)) {
+  if(!searchResults("OK", 5000, _debugLevel)) {
     return false;
   }
   
@@ -264,13 +263,19 @@ bool ESP8266::startServer(int port, long timeout)
 
 bool ESP8266::startClient(char *ip, int port, long timeout)
 {
+  clearResults();
+  
   wifi.print(F("AT+CIPSTART="));
   wifi.print(CLI_CHAN);
   wifi.print(F(",\"TCP\",\""));
   wifi.print(ip);
   wifi.print("\",");
   wifi.println(port);
-  delay(100);
+  
+  if (timeout < 1000L) {
+    timeout = 1000L;
+  }
+  
   if(!searchResults("OK", timeout, _debugLevel)) {
     return false;
   }
@@ -293,7 +298,7 @@ int ESP8266::scan(char *out, int max)
   if (_debugLevel > 0) {
     char num[6];
     itoa(max, num, 10);
-    debug("maximum lenthg of buffer: ");
+    debug("maximum length of buffer: ");
     debug(num);
   }
   wifi.println(F("AT+CWLAP"));
@@ -319,9 +324,11 @@ bool ESP8266::closeConnection(void)
     chan = CLI_CHAN;
   }
   
+  clearResults();
+  
   wifi.print("AT+CIPCLOSE=");
   wifi.println(String(chan));
-  if(!searchResults("OK", 500, _debugLevel)) {
+  if(!searchResults("OK", 5000, _debugLevel)) {
     return false;
   }
   
@@ -386,7 +393,7 @@ void ESP8266::processWifiMessage() {
 
 bool ESP8266::sendData(int chan, char *data) {
 
-  clearResults();
+  clearResults(500L);
 
   // start send
   wifi.print(F("AT+CIPSEND="));
@@ -397,29 +404,28 @@ bool ESP8266::sendData(int chan, char *data) {
   // send the data
   wifi.println(data);
   
-  delay(50);
-  
-  return searchResults("OK", 1000, _debugLevel);  
+  return searchResults("SEND OK", 10000, _debugLevel);  
 }
 
 bool ESP8266::setLinkMode(int mode) {
+  clearResults();
   wifi.print(F("AT+CIPMUX="));
   wifi.println(mode);
-  delay(500);
-  if(!searchResults("OK", 1000, _debugLevel)){
+  if(!searchResults("OK", 5000, _debugLevel)){
     return false;
   }
   return true;
 }
 
 bool ESP8266::startUDPChannel(int chan, char *address, int port) {
+  clearResults();
   wifi.print(F("AT+CIPSTART="));
   wifi.print(chan);
   wifi.print(F(",\"UDP\",\""));
   wifi.print(address);
   wifi.print("\",");
   wifi.println(port);
-  if(!searchResults("OK", 1000, _debugLevel)) {
+  if(!searchResults("OK", 5000, _debugLevel)) {
     return false;
   }
   return true;
@@ -465,7 +471,7 @@ bool ESP8266::getIP() {
   }
   
   if (_debugLevel > 0) {
-    debug("DBG Get IP:");
+    debug(F("DBG Get IP:"));
     debug(_ipaddress);
   }
 
@@ -495,7 +501,7 @@ bool ESP8266::getBroadcast() {
   _broadcast[i] = 0;
   
   if (_debugLevel > 0) {
-    debug("DBG Get Broadcast:");
+    debug(F("DBG Get Broadcast:"));
     debug(_broadcast);
   }
   
@@ -506,6 +512,13 @@ void ESP8266::debug(char *msg) {
   if (_debugLevel > 0) {
     debugSer.println(msg);
   } 
+}
+
+void ESP8266::debug(const __FlashStringHelper*msg)
+{
+  if (_debugLevel > 0) {
+    debugSer.println(msg);
+  }
 }
 
 bool ESP8266::searchResults(char *target, long timeout, int dbg)
@@ -577,15 +590,25 @@ bool ESP8266::searchResults(char *target, long timeout, int dbg)
   return false;
 }
 
-void ESP8266::clearResults() {
+void ESP8266::clearResults(unsigned long minTimeMillis) {
   char c;
-  while(wifi.available() > 0) {
-    c = wifi.read();    
-//     if (_debugLevel > 0) {
-//       char msg[2];
-//       sprintf(msg, "%c", c);
-//       msg[1] = NULL;
-//       debug(msg);
-//     }
+  unsigned long startTime = millis();
+  
+  // Get everything in the buffer first  
+  while (wifi.available() > 0) {
+    c = wifi.read();
+  }
+  
+  // ensure that we wait for at least minTimeMillis milliseconds.
+  while (millis() - startTime < minTimeMillis) {
+    while (wifi.available() > 0) {
+      c = wifi.read();
+    }
+    delay(200);
+  }
+  
+  // Get any left overs.
+  while (wifi.available() > 0) {
+    c = wifi.read();
   }
 }
