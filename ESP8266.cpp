@@ -10,6 +10,9 @@
 #define BUFFER_SIZE 255
 #define BEACON_PORT 34807
 
+// A nice prime number for interval so it reduces the likelihood to collide with other intervals
+#define BEACON_INT (6733L)
+
 enum connectMode {
   CONNECT_MODE_NONE = 0,
   CONNECT_MODE_SERVER,
@@ -34,6 +37,7 @@ char _wb[BUFFER_SIZE];
 int _wctr = 0;
 bool _connected;
 bool _forceReset;
+bool _sendingData;
 int _connectMode;
 int _debugLevel = 0;
 
@@ -50,10 +54,11 @@ ESP8266::ESP8266(int mode, long baudrate, int debugLevel)
   memset(_ssid, 0, 48);
   memset(_password, 0, 24);
   _beacon = false;
-  _beaconInterval = (10000L);
+  _beaconInterval = BEACON_INT;
   _previousMillis = 0;
   _connected = false;
   _forceReset = false;
+  _sendingData = false;
 }
 
 int ESP8266::initializeWifi(DataCallback dcb, ConnectCallback ccb)
@@ -142,8 +147,6 @@ void ESP8266::enableWatchDogTimer()
 bool ESP8266::enableBeacon(char *device)
 {
   if (device == NULL) {
-    // re-enable the beacon.
-    _beaconInterval = (10000L);
     _beacon = true;
     return true;
   }
@@ -202,7 +205,6 @@ void ESP8266::run()
  
   
   } else {
-    _previousMillis = currentMillis;
     if (_beacon == false) return;
     
     // create message text
@@ -226,10 +228,24 @@ void ESP8266::run()
     strcat(_data, _device);
     strcat(_data, line7);
     
-    sendData(BCN_CHAN, _data);
+    if (sendData(BCN_CHAN, _data))
+    {
+        _previousMillis = currentMillis;
+    }
   }
   
-  if (_forceReset == true) {
+  if (_forceReset == true) 
+  {  
+    if (currentMillis - _previousMillis > _beaconInterval * 3) 
+    {
+      // If the last successful broadcast was 2 intervals ago then something has gone wrong and we should probably reset
+      if (_debugLevel > 0) {    
+        debug("Forcing reset");  
+      }
+        // force reset
+      while(1);
+    }
+  
     // reset the watch dog timer
     wdt_reset();
   }
@@ -349,9 +365,6 @@ void ESP8266::processWifiMessage() {
   // if the message is simply "Link", then we have a live connection
   if(strncmp(_wb, "Link", 5) == 0) {
     
-    // reduce the beacon frequency by increasing the interval
-    _beaconInterval = 30000; //false;
-    
     // flag the connection as active
     _connected = true;
     
@@ -391,9 +404,15 @@ void ESP8266::processWifiMessage() {
   }
 }
 
-bool ESP8266::sendData(int chan, char *data) {
+bool ESP8266::sendData(int chan, char *data) 
+{
+  if (_sendingData == true) {
+    return false;
+  }
+  
+  _sendingData = true;
 
-  clearResults(500L);
+  clearResults(500L); 
 
   // start send
   wifi.print(F("AT+CIPSEND="));
@@ -404,7 +423,11 @@ bool ESP8266::sendData(int chan, char *data) {
   // send the data
   wifi.println(data);
   
-  return searchResults("SEND OK", 10000, _debugLevel);  
+  int result = searchResults("SEND OK", 10000, _debugLevel);
+  
+  _sendingData = false;
+  
+  return result;  
 }
 
 bool ESP8266::setLinkMode(int mode) {
@@ -576,15 +599,6 @@ bool ESP8266::searchResults(char *target, long timeout, int dbg)
       debug(_data);
       debug("Instead received end---");      
     }
-  }
-  
-  if (_forceReset == true) {
-    if (dbg > 0) {    
-      // we some how lost the link, so want to force a reset
-      debug("Forcing reset");  
-    }
-      // force reset
-    while(1);
   }
 
   return false;
