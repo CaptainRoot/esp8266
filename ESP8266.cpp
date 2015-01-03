@@ -11,7 +11,7 @@
 #define BEACON_PORT 34807
 
 // A nice prime number for interval so it reduces the likelihood to collide with other intervals
-#define BEACON_INT (6733L)
+#define BEACON_INT (18587L)
 
 enum connectMode {
   CONNECT_MODE_NONE = 0,
