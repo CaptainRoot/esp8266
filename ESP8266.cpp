@@ -29,7 +29,7 @@ char _ssid[48];
 char _password[24];
 bool _beacon;
 long _beaconInterval;
-long _previousMillis;
+unsigned long _previousMillis;
 int _replyChan;
 DataCallback _dcb;
 ConnectCallback _ccb;
@@ -181,19 +181,20 @@ bool ESP8266::send(char *data)
 
 void ESP8266::run()
 {
-  int v;
-  char _data[255];
-  unsigned long currentMillis = millis();
-  
-  if (currentMillis - _previousMillis < _beaconInterval) {
-    
+    int v;
+    char _data[255];
+    unsigned long currentMillis = millis();
+    if (currentMillis < _previousMillis) {
+        _previousMillis = 0;
+    }
+      
     // process wifi messages
     while(wifi.available() > 0) {
       v = wifi.read();
       if (v == 10) {
         _wb[_wctr] = 0;
         _wctr = 0;
-        
+
         processWifiMessage();
       } else if (v == 13) {
         // gndn
@@ -202,53 +203,22 @@ void ESP8266::run()
         _wctr++;
       }
     }
- 
   
-  } else {
-    if (_beacon == false) return;
-    
-    // create message text
-    char *line1 = "{\"event\": \"beacon\", \"ip\": \"";
-    char *line3 = "\", \"port\": ";
-    char *line5 = ", \"device\": \"";
-    char *line7 = "\"}\r\n";
-    
-    // convert port to a string
-    char p[6];
-    memset(p, 0, 6);
-    itoa(_port, p, 10);
+    if (_forceReset == true) 
+    {  
+        if (currentMillis - _previousMillis > 10000L) 
+        {
+          if (_debugLevel > 0) {    
+            debug("Forcing reset");  
+          }
+            // force reset
+          while(1);
+        }
 
-    // get lenthg of message text
-    memset(_data, 0, 255);
-    strcat(_data, line1);
-    strcat(_data, _ipaddress);
-    strcat(_data, line3);
-    strcat(_data, p);
-    strcat(_data, line5);
-    strcat(_data, _device);
-    strcat(_data, line7);
-    
-    if (sendData(BCN_CHAN, _data))
-    {
+        // reset the watch dog timer
+        wdt_reset();
         _previousMillis = currentMillis;
     }
-  }
-  
-  if (_forceReset == true) 
-  {  
-    if (currentMillis - _previousMillis > _beaconInterval * 3) 
-    {
-      // If the last successful broadcast was 2 intervals ago then something has gone wrong and we should probably reset
-      if (_debugLevel > 0) {    
-        debug("Forcing reset");  
-      }
-        // force reset
-      while(1);
-    }
-  
-    // reset the watch dog timer
-    wdt_reset();
-  }
 }
 
 bool ESP8266::startServer(int port, long timeout)
