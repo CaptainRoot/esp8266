@@ -40,10 +40,10 @@ class ESP8266
     bool disconnectWifi();
     
     // server
-    bool startServer(int port = 8000, long timeout = 300);
+    bool startServer(int port = 8000, long timeout = 180);
     
     // client
-    bool startClient(char *ip, int port, long timeout = 300);
+    bool startClient(char *ip, int port, long timeout = 180);
     
     // discovery beacon
     bool enableBeacon(char *device);

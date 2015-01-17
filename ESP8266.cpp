@@ -29,7 +29,6 @@ char _ssid[48];
 char _password[24];
 bool _beacon;
 long _beaconInterval;
-unsigned long _previousMillis;
 int _replyChan;
 DataCallback _dcb;
 ConnectCallback _ccb;
@@ -55,7 +54,6 @@ ESP8266::ESP8266(int mode, long baudrate, int debugLevel)
   memset(_password, 0, 24);
   _beacon = false;
   _beaconInterval = BEACON_INT;
-  _previousMillis = 0;
   _connected = false;
   _forceReset = false;
   _sendingData = false;
@@ -184,9 +182,6 @@ void ESP8266::run()
     int v;
     char _data[255];
     unsigned long currentMillis = millis();
-    if (currentMillis < _previousMillis) {
-        _previousMillis = 0;
-    }
       
     // process wifi messages
     while(wifi.available() > 0) {
@@ -205,19 +200,14 @@ void ESP8266::run()
     }
   
     if (_forceReset == true) 
-    {  
-        if (currentMillis - _previousMillis > 10000L) 
-        {
-          if (_debugLevel > 0) {    
-            debug("Forcing reset");  
-          }
-            // force reset
-          while(1);
+    {
+        // If the connection lasts longer than 15 min, then perform a reset due to potentially unreliable WiFi connection.
+        if (millis() > 900000UL) {
+            while(1);
         }
-
+        
         // reset the watch dog timer
         wdt_reset();
-        _previousMillis = currentMillis;
     }
 }
 
